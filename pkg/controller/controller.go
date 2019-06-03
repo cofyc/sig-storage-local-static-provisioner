@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/sig-storage-local-static-provisioner/pkg/populator"
 	"sigs.k8s.io/sig-storage-local-static-provisioner/pkg/util"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -61,8 +61,21 @@ func StartLocalController(client *kubernetes.Clientset, ptable deleter.ProcTable
 	resyncPeriod := time.Duration(config.MinResyncPeriod.Seconds()*(1+rand.Float64())) * time.Second
 
 	runtimeConfig := &common.RuntimeConfig{
-		UserConfig:      config,
-		Cache:           cache.NewVolumeCache(),
+		UserConfig: config,
+		Cache: cache.NewVolumeCache(func(obj interface{}) bool {
+			pv, ok := obj.(*v1.PersistentVolume)
+			if !ok {
+				return false
+			}
+			if pv.Annotations == nil {
+				return false
+			}
+			provisionedBy, found := pv.Annotations[common.AnnProvisionedBy]
+			if !found {
+				return false
+			}
+			return provisionedBy == provisionerName
+		}),
 		VolUtil:         util.NewVolumeUtil(),
 		APIUtil:         util.NewAPIUtil(client),
 		Client:          client,
@@ -72,7 +85,7 @@ func StartLocalController(client *kubernetes.Clientset, ptable deleter.ProcTable
 		InformerFactory: informers.NewSharedInformerFactory(client, resyncPeriod),
 	}
 
-	populator.NewPopulator(runtimeConfig)
+	populator.Start(runtimeConfig)
 
 	var jobController deleter.JobController
 	var err error
@@ -101,6 +114,7 @@ func StartLocalController(client *kubernetes.Clientset, ptable deleter.ProcTable
 			klog.Fatalf("Error syncing informer for %v", v)
 		}
 	}
+	// TODO wait volume populator synced
 	// Run controller logic.
 	if jobController != nil {
 		go jobController.Run(wait.NeverStop)

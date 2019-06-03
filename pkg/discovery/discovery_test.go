@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/sig-storage-local-static-provisioner/pkg/deleter"
 	"sigs.k8s.io/sig-storage-local-static-provisioner/pkg/util"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -340,7 +340,7 @@ func TestDiscoverVolumes_InvalidMode(t *testing.T) {
 }
 
 func testSetup(t *testing.T, test *testConfig, useAlphaAPI bool) *Discoverer {
-	test.cache = cache.NewVolumeCache()
+	test.cache = cache.NewVolumeCache(func(obj interface{}) bool { return true })
 	test.volUtil = util.NewFakeVolumeUtil(false /*deleteShouldFail*/, map[string][]*util.FakeDirEntry{})
 	test.volUtil.AddNewDirEntries(testMountDir, test.dirLayout)
 	test.cleanupTracker = &deleter.CleanupStatusTracker{ProcTable: deleter.NewProcTable(),
@@ -388,10 +388,13 @@ func testSetup(t *testing.T, test *testConfig, useAlphaAPI bool) *Discoverer {
 		}
 
 		pvName := action.(core.DeleteAction).GetName()
-		_, exists := test.cache.GetPV(pvName)
-		if exists {
-			test.cache.DeletePV(pvName)
-			return false, nil, nil
+		err := test.cache.Delete(&v1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: pvName,
+			},
+		})
+		if err != nil {
+			return false, nil, err
 		}
 		return true, nil, errors.NewNotFound(v1.Resource("persistentvolumes"), pvName)
 	})

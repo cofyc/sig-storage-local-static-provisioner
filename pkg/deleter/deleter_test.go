@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/sig-storage-local-static-provisioner/pkg/util"
 
 	batch_v1 "k8s.io/api/batch/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -513,7 +513,7 @@ func testSetupForJobCleaning(t *testing.T, config *testConfig, cleanupCmd []stri
 }
 
 func testSetup(t *testing.T, config *testConfig, cleanupCmd []string, useJobForCleaning bool) *Deleter {
-	config.cache = cache.NewVolumeCache()
+	config.cache = cache.NewVolumeCache(func(obj interface{}) bool { return true })
 	config.clientset = fake.NewSimpleClientset()
 
 	config.clientset.PrependReactor("create", "persistentvolumes", func(action core.Action) (bool, runtime.Object, error) {
@@ -529,10 +529,13 @@ func testSetup(t *testing.T, config *testConfig, cleanupCmd []string, useJobForC
 		}
 
 		pvName := action.(core.DeleteAction).GetName()
-		_, exists := config.cache.GetPV(pvName)
-		if exists {
-			config.cache.DeletePV(pvName)
-			return false, nil, nil
+		err := config.cache.Delete(&v1.PersistentVolume{
+			ObjectMeta: meta_v1.ObjectMeta{
+				Name: pvName,
+			},
+		})
+		if err != nil {
+			return false, nil, err
 		}
 		return true, nil, errors.NewNotFound(v1.Resource("persistentvolumes"), pvName)
 	})
